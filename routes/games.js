@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const gameController = require('../controllers/gameController');
 const { adminMiddleware } = require('../middleware/auth');
-const { uploadGameCover } = require('../middleware/upload');
+const { uploadGameCover } = require('../middleware/cloudinaryUpload');
 
 // Получение всех игр с фильтрацией
 router.get('/', gameController.getAllGames);

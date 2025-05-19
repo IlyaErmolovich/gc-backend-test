@@ -1,6 +1,7 @@
 const Game = require('../models/game');
 const fs = require('fs');
 const path = require('path');
+const cloudinary = require('../config/cloudinary');
 
 // Получение всех игр с фильтрацией
 exports.getAllGames = async (req, res) => {
@@ -46,9 +47,9 @@ exports.createGame = async (req, res) => {
 
     let cover_image = null;
     
-    // Если загружена обложка
+    // Если загружена обложка (Cloudinary)
     if (req.file) {
-      cover_image = `/uploads/${req.file.filename}`;
+      cover_image = req.file.path; // Cloudinary возвращает URL в path
     }
 
     // Преобразуем строки в массивы, если они пришли в виде строк
@@ -81,11 +82,27 @@ exports.updateGame = async (req, res) => {
     const gameId = req.params.id;
     const { title, developer, publisher, release_date, genres, platforms } = req.body;
     
-    let cover_image = null;
+    // Получаем текущую игру для проверки наличия старой обложки
+    const currentGame = await Game.getById(gameId);
     
-    // Если загружена новая обложка
+    let cover_image = currentGame.cover_image; // Оставляем текущую обложку, если новая не загружена
+    
+    // Если загружена новая обложка (Cloudinary)
     if (req.file) {
-      cover_image = `/uploads/${req.file.filename}`;
+      cover_image = req.file.path; // Cloudinary возвращает URL в path
+      
+      // Если была старая обложка в Cloudinary, удаляем ее
+      if (currentGame.cover_image && currentGame.cover_image.includes('cloudinary.com')) {
+        try {
+          // Извлекаем public_id из URL
+          const publicId = extractPublicIdFromUrl(currentGame.cover_image);
+          if (publicId) {
+            await cloudinary.uploader.destroy(publicId);
+          }
+        } catch (err) {
+          console.error('Ошибка при удалении старой обложки из Cloudinary:', err);
+        }
+      }
     }
 
     // Преобразуем строки в массивы, если они пришли в виде строк
@@ -123,8 +140,19 @@ exports.deleteGame = async (req, res) => {
     // Удаляем игру из базы данных
     await Game.delete(gameId);
     
-    // Если у игры была обложка, удаляем файл
-    if (game.cover_image) {
+    // Если у игры была обложка в Cloudinary, удаляем файл
+    if (game.cover_image && game.cover_image.includes('cloudinary.com')) {
+      try {
+        // Извлекаем public_id из URL
+        const publicId = extractPublicIdFromUrl(game.cover_image);
+        if (publicId) {
+          await cloudinary.uploader.destroy(publicId);
+        }
+      } catch (err) {
+        console.error('Ошибка при удалении обложки из Cloudinary:', err);
+      }
+    } else if (game.cover_image) {
+      // Для обратной совместимости - удаляем локальный файл, если он существует
       const coverPath = path.join(__dirname, '..', game.cover_image);
       if (fs.existsSync(coverPath)) {
         fs.unlinkSync(coverPath);
@@ -155,4 +183,32 @@ exports.getAllPlatforms = async (req, res) => {
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
-}; 
+};
+
+// Вспомогательная функция для извлечения public_id из URL Cloudinary
+function extractPublicIdFromUrl(url) {
+  try {
+    if (!url || !url.includes('cloudinary.com')) return null;
+    
+    // Получаем части URL
+    const parts = url.split('/');
+    
+    // Ищем индекс "upload" в URL
+    const uploadIndex = parts.findIndex(part => part === 'upload');
+    if (uploadIndex === -1) return null;
+    
+    // Получаем части после "upload" - это папка и имя файла
+    const afterUpload = parts.slice(uploadIndex + 1);
+    
+    // Последняя часть содержит расширение, удаляем его
+    const lastPart = afterUpload[afterUpload.length - 1];
+    const fileNameWithoutExt = lastPart.split('.')[0];
+    afterUpload[afterUpload.length - 1] = fileNameWithoutExt;
+    
+    // Соединяем все части для получения полного public_id
+    return afterUpload.join('/');
+  } catch (err) {
+    console.error('Ошибка при извлечении public_id из URL:', err);
+    return null;
+  }
+} 
