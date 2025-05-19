@@ -1,9 +1,34 @@
 const db = require('../config/db');
 
+// Функция для повторных попыток запроса к БД
+const retryQuery = async (queryFn, maxRetries = 3, delay = 1000) => {
+  let lastError;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await queryFn();
+    } catch (error) {
+      lastError = error;
+      console.error(`Попытка ${attempt}/${maxRetries} не удалась:`, error.message);
+      
+      // Для определенных ошибок ждем и пробуем снова
+      if (error.code === 'ETIMEDOUT' || error.code === 'PROTOCOL_CONNECTION_LOST' || error.code === 'ECONNREFUSED') {
+        await new Promise(resolve => setTimeout(resolve, delay * attempt)); // Увеличиваем задержку с каждой попыткой
+        continue;
+      }
+      
+      // Другие ошибки пробрасываем наверх
+      throw error;
+    }
+  }
+  
+  // Если все попытки не удались, выбрасываем последнюю ошибку
+  throw lastError;
+};
+
 class Game {
   // Получение всех игр
   static async getAll(filters = {}) {
-    try {
+    return retryQuery(async () => {
       let query = `
         SELECT g.*, 
                GROUP_CONCAT(DISTINCT gen.name) AS genres, 
@@ -58,7 +83,9 @@ class Game {
       query += ' LIMIT ? OFFSET ?';
       queryParams.push(Number(limit), Number(offset));
 
+      console.log('Выполняем запрос всех игр');
       const [games] = await db.query(query, queryParams);
+      console.log(`Получено ${games.length} игр`);
 
       // Преобразуем строки жанров и платформ в массивы
       return games.map(game => ({
@@ -66,14 +93,13 @@ class Game {
         genres: game.genres ? game.genres.split(',') : [],
         platforms: game.platforms ? game.platforms.split(',') : []
       }));
-    } catch (error) {
-      throw error;
-    }
+    });
   }
 
   // Получение игры по ID
   static async getById(id) {
-    try {
+    return retryQuery(async () => {
+      console.log('Выполняем запрос игры по ID:', id);
       const [games] = await db.query(`
         SELECT g.*, 
                GROUP_CONCAT(DISTINCT gen.name) AS genres, 
@@ -92,6 +118,7 @@ class Game {
       }
 
       const game = games[0];
+      console.log('Игра найдена:', game.title);
       
       // Преобразуем строки жанров и платформ в массивы
       return {
@@ -99,16 +126,15 @@ class Game {
         genres: game.genres ? game.genres.split(',') : [],
         platforms: game.platforms ? game.platforms.split(',') : []
       };
-    } catch (error) {
-      throw error;
-    }
+    });
   }
 
   // Создание новой игры
   static async create(gameData) {
-    try {
+    return retryQuery(async () => {
       const { title, developer, publisher, release_date, cover_image, genres, platforms } = gameData;
 
+      console.log('Создание новой игры:', title);
       // Получаем максимальный ID для создания нового
       const [maxIdResult] = await db.query('SELECT MAX(id) as maxId FROM games');
       const newId = maxIdResult[0].maxId ? maxIdResult[0].maxId + 1 : 1;
@@ -151,15 +177,15 @@ class Game {
         }
       }
 
+      console.log('Игра успешно создана, ID:', newId);
       return await this.getById(newId);
-    } catch (error) {
-      throw error;
-    }
+    });
   }
 
   // Обновление игры
   static async update(id, gameData) {
-    try {
+    return retryQuery(async () => {
+      console.log('Обновление игры, ID:', id);
       const { title, developer, publisher, release_date, cover_image, genres, platforms } = gameData;
 
       // Обновляем основные данные игры
@@ -237,15 +263,15 @@ class Game {
         }
       }
 
+      console.log('Игра успешно обновлена');
       return await this.getById(id);
-    } catch (error) {
-      throw error;
-    }
+    });
   }
 
   // Удаление игры
   static async delete(id) {
-    try {
+    return retryQuery(async () => {
+      console.log('Удаление игры, ID:', id);
       // Проверяем, существует ли игра
       const [games] = await db.query('SELECT * FROM games WHERE id = ?', [id]);
       
@@ -261,30 +287,29 @@ class Game {
       // Удаляем игру
       await db.query('DELETE FROM games WHERE id = ?', [id]);
 
+      console.log('Игра успешно удалена');
       return { message: 'Игра успешно удалена' };
-    } catch (error) {
-      throw error;
-    }
+    });
   }
 
   // Получение всех жанров
   static async getAllGenres() {
-    try {
+    return retryQuery(async () => {
+      console.log('Запрос на получение всех жанров');
       const [genres] = await db.query('SELECT * FROM genres ORDER BY name');
+      console.log(`Получено ${genres.length} жанров`);
       return genres;
-    } catch (error) {
-      throw error;
-    }
+    });
   }
 
   // Получение всех платформ
   static async getAllPlatforms() {
-    try {
+    return retryQuery(async () => {
+      console.log('Запрос на получение всех платформ');
       const [platforms] = await db.query('SELECT * FROM platforms ORDER BY name');
+      console.log(`Получено ${platforms.length} платформ`);
       return platforms;
-    } catch (error) {
-      throw error;
-    }
+    });
   }
 }
 
