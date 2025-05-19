@@ -1,7 +1,15 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
 require('dotenv').config();
+
+// Создаем uploads директорию, если она не существует
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  console.log('Создаем директорию uploads...');
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
 
 // Создаем экземпляр приложения Express
 const app = express();
@@ -33,7 +41,7 @@ app.use('/api/users', usersRoutes);
 
 // Обработка ошибок
 app.use((err, req, res, next) => {
-  console.error(err.stack);
+  console.error('Ошибка сервера:', err.stack);
   res.status(500).json({
     message: 'Что-то пошло не так!',
     error: process.env.NODE_ENV === 'production' ? {} : err
